@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mario Style Game</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;background:#6ec6ff;overflow:hidden;}
+canvas{display:block;margin:auto;background:linear-gradient(#6ec6ff,#b3e5fc);}
+</style>
+</head>
+
+<body>
+<canvas id="game" width="900" height="450"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+/* ===== STORAGE ===== */
+let highScore = localStorage.getItem("highScore") || 0;
+
+/* ===== GAME STATE ===== */
+let gameStarted = false;
+let gameOver = false;
+let score = 0;
+let cameraX = 0;
+
+/* ===== PLAYER ===== */
+const player = {
+  x:120, y:0,
+  w:40, h:50,
+  dx:3.4, dy:0,
+  gravity:0.95,
+  jump:-15.5,
+  grounded:false
+};
+
+const groundY = canvas.height - 60;
+
+/* ===== GROUND WITH PLAYABLE GAPS ===== */
+let grounds = [];
+let nextGroundX = 0;
+
+// tuned for fairness
+const GROUND_MIN_W = 240;
+const GROUND_MAX_W = 320;
+const GAP_MIN = 70;
+const GAP_MAX = 120;
+
+function createGround(x){
+  return {
+    x,
+    y: groundY,
+    w: Math.random()*(GROUND_MAX_W-GROUND_MIN_W)+GROUND_MIN_W,
+    h: 60
+  };
+}
+function initGround(){
+  grounds=[]; nextGroundX=0;
+  for(let i=0;i<6;i++){
+    let g=createGround(nextGroundX);
+    grounds.push(g);
+    nextGroundX += g.w + (Math.random()*(GAP_MAX-GAP_MIN)+GAP_MIN);
+  }
+}
+
+/* ===== AIR BLOCKS ===== */
+let blocks=[], nextBlockX=350;
+function createBlock(x){
+  return { x, y:Math.random()*120+180, w:40, h:40, hit:false };
+}
+function initBlocks(){
+  blocks=[]; nextBlockX=350;
+  for(let i=0;i<6;i++){
+    blocks.push(createBlock(nextBlockX));
+    nextBlockX += Math.random()*260 + 220;
+  }
+}
+
+/* ===== RESTART BUTTON ===== */
+const restartBtn = {
+  w: 220, h: 52,
+  get x(){ return canvas.width/2 - this.w/2; },
+  get y(){ return canvas.height/2 + 40; }
+};
+
+/* ===== RESET ===== */
+function resetGame(){
+  if(score > highScore){
+    highScore = score;
+    localStorage.setItem("highScore", highScore);
+  }
+  gameStarted=false; gameOver=false; score=0; cameraX=0;
+  player.x=120; player.y=0; player.dy=0; player.grounded=false;
+  initGround(); initBlocks();
+}
+
+/* ===== INPUT ===== */
+function handleTap(e){
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.touches?e.touches[0].clientX:e.clientX) - rect.left;
+  const cy = (e.touches?e.touches[0].clientY:e.clientY) - rect.top;
+
+  if(!gameStarted){
+    if(cx>restartBtn.x && cx<restartBtn.x+restartBtn.w &&
+       cy>restartBtn.y && cy<restartBtn.y+restartBtn.h){
+      gameStarted=true;
+    }
+    return;
+  }
+
+  if(gameOver){
+    if(cx>restartBtn.x && cx<restartBtn.x+restartBtn.w &&
+       cy>restartBtn.y && cy<restartBtn.y+restartBtn.h){
+      resetGame();
+    }
+    return;
+  }
+
+  if(player.grounded){
+    player.dy = player.jump;
+    player.grounded=false;
+  }
+}
+canvas.addEventListener("touchstart", handleTap);
+canvas.addEventListener("click", handleTap);
+document.addEventListener("keydown", e=>{
+  if(e.code==="Space"){
+    if(!gameStarted) gameStarted=true;
+    else if(gameOver) resetGame();
+    else if(player.grounded){ player.dy=player.jump; player.grounded=false; }
+  }
+});
+
+/* ===== UPDATE ===== */
+function update(){
+  if(!gameStarted || gameOver) return;
+
+  player.x += player.dx;
+  cameraX += player.dx;
+  score++;
+
+  player.dy += player.gravity;
+  player.y += player.dy;
+  player.grounded=false;
+
+  /* ---- GROUND COLLISION (ROBUST) ---- */
+  grounds.forEach(g=>{
+    const withinX = player.x+player.w > g.x+2 && player.x < g.x+g.w-2;
+    const landingNow = player.y+player.h <= g.y+12 && player.y+player.h+player.dy >= g.y;
+    if(withinX && landingNow && player.dy>=0){
+      player.y = g.y - player.h;
+      player.dy = 0;
+      player.grounded = true;
+    }
+  });
+
+  /* ---- AIR BLOCK COLLISIONS ---- */
+  blocks.forEach(b=>{
+    // LAND ON TOP (allowed)
+    const landTop = player.dy>=0 &&
+      player.y+player.h <= b.y+12 &&
+      player.y+player.h+player.dy >= b.y &&
+      player.x+player.w > b.x+6 &&
+      player.x < b.x+b.w-6;
+    if(landTop){
+      player.y=b.y-player.h;
+      player.dy=0;
+      player.grounded=true;
+    }
+
+    // HIT FROM BELOW → COIN
+    const hitBelow = !b.hit &&
+      player.dy<0 &&
+      player.y <= b.y+b.h &&
+      player.y >= b.y+b.h-10 &&
+      player.x+player.w > b.x &&
+      player.x < b.x+b.w;
+    if(hitBelow){
+      b.hit=true;
+      score+=200;
+      player.dy=2;
+    }
+
+    // SIDE COLLISION → GAME OVER (ALWAYS)
+    const sideHit =
+      !b.hit &&
+      player.x+player.w > b.x &&
+      player.x < b.x+b.w &&
+      player.y+player.h > b.y+10 &&
+      player.y < b.y+b.h-10 &&
+      !landTop && !hitBelow;
+    if(sideHit){
+      gameOver=true;
+    }
+  });
+
+  /* ---- RECYCLE ---- */
+  if(grounds[0].x + grounds[0].w < cameraX){
+    grounds.shift();
+    let g=createGround(nextGroundX);
+    grounds.push(g);
+    nextGroundX += g.w + (Math.random()*(GAP_MAX-GAP_MIN)+GAP_MIN);
+  }
+  if(blocks[0].x + 40 < cameraX){
+    blocks.shift();
+    blocks.push(createBlock(nextBlockX));
+    nextBlockX += Math.random()*260 + 220;
+  }
+
+  /* ---- FALL ---- */
+  if(player.y > canvas.height + 70) gameOver=true;
+}
+
+/* ===== DRAW ===== */
+function drawGround(){
+  ctx.fillStyle="#2e7d32";
+  grounds.forEach(g=>ctx.fillRect(g.x-cameraX, g.y, g.w, g.h));
+}
+function drawBlocks(){
+  ctx.fillStyle="#ffca28";
+  blocks.forEach(b=>{ if(!b.hit) ctx.fillRect(b.x-cameraX,b.y,b.w,b.h); });
+}
+function drawPlayer(){
+  ctx.fillStyle="#e53935";
+  ctx.fillRect(player.x-cameraX,player.y,player.w,player.h);
+}
+function drawButton(text){
+  ctx.fillStyle="#d32f2f";
+  ctx.fillRect(restartBtn.x,restartBtn.y,restartBtn.w,restartBtn.h);
+  ctx.fillStyle="#fff";
+  ctx.font="20px Arial";
+  ctx.textAlign="center";
+  ctx.fillText(text, restartBtn.x+restartBtn.w/2, restartBtn.y+33);
+  ctx.textAlign="left";
+}
+function drawUI(){
+  ctx.fillStyle="#000";
+  ctx.font="18px Arial";
+  ctx.fillText("Score: "+score,20,30);
+  ctx.fillText("High Score: "+highScore,20,55);
+
+  if(!gameStarted){
+    ctx.fillStyle="rgba(0,0,0,0.6)";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    drawButton("START");
+  }
+
+  if(gameOver){
+    ctx.fillStyle="rgba(0,0,0,0.75)";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.save();
+    ctx.textAlign="center";
+    ctx.font="bold 34px Arial";
+    ctx.shadowColor="yellow"; ctx.shadowBlur=18;
+    ctx.fillStyle="#ffeb3b";
+    ctx.fillText("KYA RE BURCHATTE", canvas.width/2, canvas.height/2-20);
+    ctx.restore();
+    drawButton("RESTART");
+  }
+}
+
+/* ===== LOOP ===== */
+function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  update();
+  drawGround(); drawBlocks(); drawPlayer(); drawUI();
+  requestAnimationFrame(loop);
+}
+
+/* ===== START ===== */
+resetGame();
+loop();
+</script>
+</body>
+</html>
