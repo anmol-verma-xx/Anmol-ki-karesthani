@@ -68,7 +68,13 @@ function initGround(){
 /* ===== AIR BLOCKS ===== */
 let blocks=[], nextBlockX=350;
 function createBlock(x){
-  return { x, y:Math.random()*120+180, w:40, h:40, hit:false };
+  return {
+    x: x,
+    y: BLOCK_Y,
+    w: 120,   // 👈 rectangle width (long)
+    h: 30,    // 👈 rectangle height (thin)
+    hit: false
+  };
 }
 function initBlocks(){
   blocks=[]; nextBlockX=350;
